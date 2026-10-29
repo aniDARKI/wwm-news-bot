@@ -8,9 +8,7 @@ from googletrans import SyncTranslator
 import translators as ts
 
 # --- НАСТРОЙКИ ---
-# Получаем строку со ссылками, разделяем ее по запятой и убираем пробелы
-raw_urls = os.environ.get("DISCORD_WEBHOOK_URL", "ВАШ_URL_ВЕБХУКА_ЗДЕСЬ")
-WEBHOOK_URLS = [url.strip() for url in raw_urls.split(',') if url.strip()]
+WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "ВАШ_URL_ВЕБХУКА_ЗДЕСЬ").strip()
 NEWS_URL = "https://www.wherewindsmeetgame.com/news/"
 STATE_FILE = "sent_news.json"
 
@@ -29,7 +27,6 @@ def save_sent_news(sent_set):
 def translate_text(text):
     if not text or not text.strip():
         return ""
-    # Ограничение Google Translate - 5000 символов на запрос
     if len(text) > 4500:
         text = text[:4500] + "..."
         
@@ -52,23 +49,28 @@ def fetch_news_list():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    response = requests.get(NEWS_URL, headers=headers, timeout=30)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
-    
-    news_items = []
-    for item in soup.select(".news_list li"):
-        link_tag = item.find("a", class_="news")
-        if not link_tag:
-            continue
+    try:
+        response = requests.get(NEWS_URL, headers=headers, timeout=30)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
         
-        title = link_tag.get("title") or link_tag.find("p", class_="news_tit").get_text(strip=True)
-        url = link_tag.get("href")
-        if url and url.startswith("/"):
-            url = "https://www.wherewindsmeetgame.com" + url
-        
-        news_items.append({"id": url, "title": title, "url": url})
-    return news_items
+        news_items = []
+        for item in soup.select(".news_list li"):
+            link_tag = item.find("a", class_="news")
+            if not link_tag:
+                continue
+            
+            title = link_tag.get("title") or link_tag.find("p", class_="news_tit").get_text(strip=True)
+            url = link_tag.get("href")
+            if url and url.startswith("/"):
+                url = "https://www.wherewindsmeetgame.com" + url
+            
+            if url: # Защита: добавляем только если ссылка существует
+                news_items.append({"id": url, "title": title, "url": url})
+        return news_items
+    except Exception as e:
+        print(f"❌ Ошибка при получении списка новостей: {e}")
+        return []
 
 def fetch_article_details(url):
     headers = {
@@ -91,7 +93,6 @@ def fetch_article_details(url):
         description_text = ""
         
         if content_div:
-            # Поиск картинки (отсеиваем иконки)
             for img_tag in content_div.find_all("img"):
                 src = img_tag.get("src")
                 if not src:
@@ -120,7 +121,6 @@ def fetch_article_details(url):
                 image_url = src
                 break 
             
-            # === ПАРСИНГ ПОЛНОГО ТЕКСТА ===
             paragraphs = content_div.find_all("p")
             text_pieces = []
             
@@ -131,14 +131,12 @@ def fetch_article_details(url):
                     if text and len(text) > 15:
                         text_pieces.append(text)
                         current_length += len(text)
-                    # Собираем текст, пока не наберем ~3500 символов (чтобы после перевода влезло в лимит Discord)
                     if current_length > 3500:
                         break
             else:
-                # Если тегов <p> нет, берем весь текст из контейнера
                 raw_text = content_div.get_text(separator='\n', strip=True)
                 lines = [line for line in raw_text.split('\n') if len(line) > 20]
-                text_pieces = lines[:15] # Берем больше строк
+                text_pieces = lines[:15]
             
             if text_pieces:
                 description_text = "\n\n".join(text_pieces)
@@ -159,8 +157,6 @@ def send_to_discord(news_item, details):
     else:
         rus_desc = "Подробное описание доступно по ссылке ниже."
     
-    # === ОБРАБОТКА ЛИМИТА DISCORD (4096 СИМВОЛОВ) ===
-    # Если текст перевода всё еще слишком длинный, аккуратно обрезаем его до безопасного предела
     if len(rus_desc) > 3800:
         rus_desc = rus_desc[:3800] + "\n\n**(Текст сокращен из-за лимитов Discord. Полная версия по ссылке ниже)**"
         
@@ -180,8 +176,13 @@ def send_to_discord(news_item, details):
         "embeds": [embed]
     }
     
-    # Отправляем сообщение по каждой ссылке из списка
-    for url in WEBHOOK_URLS:
+    # Отправляем сообщение по каждой ссылке из списка (поддержка нескольких вебхуков)
+    if isinstance(WEBHOOK_URL, str) and ',' in WEBHOOK_URL:
+        urls = [u.strip() for u in WEBHOOK_URL.split(',') if u.strip()]
+    else:
+        urls = [WEBHOOK_URL]
+
+    for url in urls:
         try:
             response = requests.post(url, json=payload, timeout=15)
             if response.status_code == 429:
@@ -193,13 +194,22 @@ def send_to_discord(news_item, details):
         except Exception as e:
             print(f"❌ Ошибка при отправке в канал {url[:30]}...: {e}")
         
-        # Небольшая пауза между отправками в разные каналы, чтобы Discord не забанил
-        time.sleep(1) 
+        time.sleep(1)
 
 def main():
     sent_ids = load_sent_news()
     news_list = fetch_news_list()
     
+    # ЗАЩИТА: Если новостей не найдено (сайт заблокировал), НЕ перезаписываем файл
+    if not news_list:
+        print("⚠️ ВНИМАНИЕ: Не удалось получить новости с сайта (возможно, блокировка).")
+        print("⚠️ Скрипт завершает работу, чтобы не стереть историю отправленных новостей.")
+        return
+        
+    print(f"Найдено новостей на сайте: {len(news_list)}")
+    print(f"Уже было отправлено ранее: {len(sent_ids)}")
+    
+    sent_anything = False
     for news in reversed(news_list):
         if news["id"] not in sent_ids:
             print(f"\n--- Новая новость: {news['title']} ---")
@@ -208,11 +218,17 @@ def main():
             try:
                 send_to_discord(news, details)
                 sent_ids.add(news["id"])
+                sent_anything = True
                 time.sleep(3)
             except Exception as e:
                 print(f"❌ Ошибка при отправке «{news['title']}»: {e}")
     
-    save_sent_news(sent_ids)
+    # Сохраняем файл только если были отправлены новые новости или если список изменился
+    if sent_anything:
+        save_sent_news(sent_ids)
+        print(f"\n💾 Файл sent_news.json обновлен. Всего в памяти: {len(sent_ids)} новостей.")
+    else:
+        print("\nℹ️ Новых новостей не найдено. Файл sent_news.json не изменен.")
 
 if __name__ == "__main__":
     main()

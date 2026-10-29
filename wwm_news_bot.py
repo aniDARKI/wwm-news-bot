@@ -8,7 +8,9 @@ from googletrans import SyncTranslator
 import translators as ts
 
 # --- НАСТРОЙКИ ---
-WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1565431976306016406/VOTtvU22ivtgAfio31V9J725NY7jRQ2P4KGOQD9t-4jtnm9yR6N6gbnnoDeiR8o5657k ").strip()
+# Получаем строку со ссылками, разделяем ее по запятой и убираем пробелы
+raw_urls = os.environ.get("DISCORD_WEBHOOK_URL", "ВАШ_URL_ВЕБХУКА_ЗДЕСЬ")
+WEBHOOK_URLS = [url.strip() for url in raw_urls.split(',') if url.strip()]
 NEWS_URL = "https://www.wherewindsmeetgame.com/news/"
 STATE_FILE = "sent_news.json"
 

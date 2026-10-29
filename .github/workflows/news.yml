@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # Важно: загружаем полную историю, чтобы rebase работал корректно
+          # Важно: загружаем полную историю для корректной работы rebase
           fetch-depth: 0
 
       - name: Set up Python
@@ -33,7 +33,7 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python wwm_news_bot.py
 
-      # НОВЫЙ ШАГ: Синхронизация с удаленной веткой перед пушем
+      # Синхронизация с удаленной веткой перед пушем
       - name: Pull latest changes
         run: git pull --rebase origin main
 

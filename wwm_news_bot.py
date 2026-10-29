@@ -180,13 +180,21 @@ def send_to_discord(news_item, details):
         "embeds": [embed]
     }
     
-    response = requests.post(WEBHOOK_URL, json=payload, timeout=15)
-    if response.status_code == 429:
-        retry_after = response.json().get("retry_after", 1)
-        time.sleep(retry_after)
-        response = requests.post(WEBHOOK_URL, json=payload, timeout=15)
-    response.raise_for_status()
-    print(f"✅ Успешно отправлено: {rus_title}")
+    # Отправляем сообщение по каждой ссылке из списка
+    for url in WEBHOOK_URLS:
+        try:
+            response = requests.post(url, json=payload, timeout=15)
+            if response.status_code == 429:
+                retry_after = response.json().get("retry_after", 1)
+                time.sleep(retry_after)
+                response = requests.post(url, json=payload, timeout=15)
+            response.raise_for_status()
+            print(f"✅ Успешно отправлено в канал: {url[:30]}...")
+        except Exception as e:
+            print(f"❌ Ошибка при отправке в канал {url[:30]}...: {e}")
+        
+        # Небольшая пауза между отправками в разные каналы, чтобы Discord не забанил
+        time.sleep(1) 
 
 def main():
     sent_ids = load_sent_news()

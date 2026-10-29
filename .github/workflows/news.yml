@@ -9,14 +9,13 @@ jobs:
   post-news:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Обязательно для сохранения файла
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # Важно: загружаем полную историю для корректной работы rebase
-          fetch-depth: 0
+          fetch-depth: 0 # Нужно для корректной работы авто-коммита
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,13 +32,9 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python wwm_news_bot.py
 
-      # Синхронизация с удаленной веткой перед пушем
-      - name: Pull latest changes
-        run: git pull --rebase origin main
-
+      # Заменяем ручной git push на надежное готовое действие
       - name: Commit and push state file
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add sent_news.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update sent news state" && git push)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update sent news state"
+          file_pattern: sent_news.json
